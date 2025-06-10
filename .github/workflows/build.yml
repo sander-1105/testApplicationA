@@ -308,9 +308,9 @@ jobs:
               execSync('git push origin main');
             } catch (error) {
               core.setFailed(`Failed to update chart: ${error.message}`);
-            }
-            
-# 使用更细粒度的权限
+                          }
+
+# Use fine-grained permissions
 permissions:
   contents: write
   packages: write
