@@ -3,7 +3,7 @@
 # CI/CD Pipeline Documentation
 
 ## Overview
-This repository uses GitHub Actions for continuous integration and deployment. The pipeline automatically manages version updates and Helm chart synchronization.
+This repository uses GitHub Actions for continuous integration and deployment. The pipeline automatically manages version updates and Helm chart synchronization with strict validation to ensure reliability.
 
 ## Workflow Structure
 
@@ -13,7 +13,7 @@ The workflow is triggered on:
 - Pull requests to `main` branch (only on opened and reopened)
 - Manual trigger (workflow_dispatch)
 
-### Jobs
+### Jobs Execution Order
 
 #### 1. Version Check
 - Checks if the VERSION file has been modified
@@ -24,26 +24,29 @@ The workflow is triggered on:
 #### 2. Setup
 - Sets up Python environment
 - Configures dependency caching
-- Prepares the build environment
+- **Reads and calculates version numbers**
+- Provides version outputs for subsequent jobs
 
-#### 3. Version Update
-- Reads current version from VERSION file
-- Increments the version number
-- Updates the VERSION file
-- Creates and pushes a new version tag
-- Ensures proper branch checkout before pushing changes
+#### 3. Chart Validation
+- **Validates chart repository access without making changes**
+- Tests SSH connection and repository permissions
+- Verifies Chart.yaml file exists and is parseable
+- Logs current and planned version information
+- **Critical**: Stops pipeline if validation fails
 
-#### 4. Chart Update
+#### 4. Version Update
+- **Only executes if all previous steps succeed**
+- Updates VERSION file with new version number
+- Creates and pushes version tag
+- Commits changes directly to main branch
+- **Protected**: Will not run if any validation fails
+
+#### 5. Chart Update
+- **Only executes after successful version update**
 - Updates the Helm chart repository
-- Synchronizes the new version with the chart
+- Synchronizes new version with chart appVersion
 - Uses SSH for secure repository access
-- Handles SSH key setup automatically
-
-#### 5. Notification
-- Sends build status notifications via GitHub Issues
-- Includes detailed build information
-- Gracefully handles notification failures
-- Provides workflow and run context
+- Commits and pushes chart changes
 
 ## Prerequisites
 
@@ -52,13 +55,9 @@ Add the following secrets to your GitHub repository (Settings > Secrets and vari
 
 1. `SSH_PRIVATE_KEY`
    - SSH private key for accessing the Helm chart repository
-   - Used for secure Git operations
-   - Must have access to the Helm chart repository
-
-2. `PAT` (Personal Access Token)
-   - GitHub Personal Access Token
-   - Used for repository operations
-   - Must have appropriate permissions
+   - Must be in OpenSSH format (PEM)
+   - Must have read/write access to the Helm chart repository
+   - The key will be automatically formatted to handle line ending issues
 
 ### Automatic Secrets
 
@@ -78,16 +77,33 @@ Add the following secrets to your GitHub repository (Settings > Secrets and vari
 
 2. `ci.yml` file
    - Must exist in the repository root
-   - Contains the Helm chart repository URL
+   - Contains the Helm chart repository SSH URL
    - Format: `helm-chart-ssh-url: "git@github.com:owner/repo.git"`
+   - The repository name will be automatically extracted from the URL
+
+## Safety Features
+
+### Fail-Safe Mechanisms
+1. **Pre-validation**: Chart repository access is validated before any changes
+2. **Sequential execution**: Version update only happens after all validations pass
+3. **Atomic operations**: Each step includes comprehensive error handling
+4. **Branch protection**: All operations are restricted to main branch only
+
+### Error Handling
+The workflow includes comprehensive error handling for:
+- File existence checks
+- Version format validation
+- SSH connection and authentication
+- Git operation failures
+- Chart repository access issues
+- YAML parsing errors
 
 ## Permissions
 
 The workflow requires the following permissions:
 - `contents: write` - For pushing code and tags
 - `packages: write` - For package operations
-- `pull-requests: write` - For creating notifications
-- `issues: write` - For creating build status issues
+- `pull-requests: write` - For PR operations
 
 ## Concurrency Control
 
@@ -99,16 +115,6 @@ The workflow implements concurrency control to:
 ## Timeout Settings
 
 Each job has a 30-minute timeout to prevent hanging workflows.
-
-## Error Handling
-
-The workflow includes comprehensive error handling:
-- File existence checks
-- Version format validation
-- Git operation error handling
-- SSH connection error handling
-- Chart update error handling
-- Notification error handling (non-blocking)
 
 ## Manual Trigger
 
@@ -123,60 +129,83 @@ To manually trigger the workflow:
 
 ### Common Issues
 
-1. **Version Update Fails**
-   - Check if VERSION file exists and has correct format
-   - Verify repository permissions
-   - Check if version number is valid
-   - Ensure proper branch checkout
-
-2. **Chart Update Fails**
+1. **SSH Connection Failures**
    - Verify SSH_PRIVATE_KEY secret is correctly set
-   - Check if helm-chart-ssh-url in ci.yml is correct
-   - Ensure SSH key has access to the chart repository
-   - Check SSH key permissions (should be 600)
+   - Ensure the SSH key is in OpenSSH format
+   - Check if the key has access to the chart repository
+   - Verify the chart repository URL in ci.yml is correct
 
-3. **Permission Issues**
-   - Verify all required permissions are set
-   - Check if PAT has sufficient permissions
-   - Ensure SSH key has correct permissions
-   - Verify repository settings allow workflow access
-   - Check if GITHUB_TOKEN has required permissions
+2. **Version Update Fails**
+   - Check if VERSION file exists and has correct format
+   - Verify repository permissions allow pushing to main branch
+   - Ensure version number format is valid (x.y.z)
 
-4. **Notification Issues**
-   - Check if issues are enabled in the repository
-   - Verify workflow has issues:write permission
-   - Check GitHub token permissions
+3. **Chart Validation Fails**
+   - Verify helm-chart-ssh-url in ci.yml is accessible
+   - Check if Chart.yaml exists in the target repository
+   - Ensure the chart repository is on the main branch
+
+4. **Permission Issues**
+   - Verify all required permissions are set in workflow
+   - Check if repository settings allow workflow access
+   - Ensure SSH key has correct repository permissions
+
+### SSH Key Setup
+
+1. Generate an SSH key pair:
+   ```bash
+   ssh-keygen -t rsa -b 4096 -C "github-actions@yourdomain.com"
+   ```
+
+2. Add the public key to your chart repository's deploy keys
+
+3. Add the private key to your repository secrets as `SSH_PRIVATE_KEY`
 
 ### Logs and Debugging
 
 - Check the Actions tab in GitHub for detailed logs
 - Each job provides step-by-step execution logs
-- Error messages are clearly displayed in the workflow run
-- Notification failures are logged but don't fail the workflow
+- Error messages include specific failure reasons
+- SSH connection testing is included in the logs
 
 ## Best Practices
 
 1. **Version Management**
    - Always update VERSION file for new releases
    - Follow semantic versioning (x.y.z)
-   - Commit version changes separately
-   - Ensure proper branch checkout before pushing
+   - Commit version changes in separate commits
+   - Review version increments before merging
 
 2. **Security**
-   - Regularly rotate SSH keys and PAT
+   - Regularly rotate SSH keys
    - Use repository secrets for sensitive data
    - Review workflow permissions regularly
    - Keep SSH key permissions secure (600)
-   - Use GITHUB_TOKEN for internal repository operations
+   - Monitor repository access logs
 
 3. **Maintenance**
    - Keep actions up to date
    - Monitor workflow execution times
-   - Review and update timeout settings as needed
-   - Regularly check notification delivery
+   - Review timeout settings periodically
+   - Test SSH connections regularly
 
 4. **PR Management**
-   - Use PR templates if needed
-   - Review PR checks before merging
-   - Monitor build notifications
-   - Keep PR branches up to date
+   - Use PR templates for consistency
+   - Review all PR checks before merging
+   - Keep PR branches up to date with main
+   - Test changes in feature branches first
+
+## Workflow Execution Flow
+
+1. **Validation Phase**:
+   - Version check → Setup → Chart validation
+
+2. **Update Phase** (only if validation succeeds):
+   - Version update → Chart update
+
+3. **Safety Guarantees**:
+   - No version changes if any step fails
+   - No tags created if validation fails
+   - Chart updates only after version is committed
+
+This ensures that your main branch always remains in a consistent state.
