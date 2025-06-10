@@ -1,0 +1,159 @@
+name: Build and Version Management
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '**'
+  workflow_dispatch:
+
+jobs:
+  version-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Version Check
+        run: |
+          if [[ $(git diff --name-only HEAD~1 HEAD) == *"VERSION"* ]]; then
+            echo "Version file changed, proceeding with build"
+          else
+            echo "No version change, skipping build"
+            exit 0
+          fi
+
+  setup:
+    needs: version-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.npm
+            node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+
+  version-update:
+    needs: setup
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read current version
+        id: read_version
+        run: |
+          VERSION=$(cat VERSION | grep "export VERSION=" | cut -d'=' -f2)
+          echo "CURRENT_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "NEW_VERSION=$(echo $VERSION | awk -F. '{$2 = $2 + 1;} 1' | sed 's/ /./g')" >> $GITHUB_ENV
+
+      - name: Update version file
+        run: |
+          sed -i.bak "s/export VERSION=.*/export VERSION=${{ env.NEW_VERSION }}/" VERSION && rm VERSION.bak
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'github-actions@github.com'
+          git add VERSION
+          git commit -m "Bump version to ${{ env.NEW_VERSION }}"
+          git push
+
+      - name: Create and push tag
+        run: |
+          git tag -a "v${{ env.NEW_VERSION }}" -m "Release version ${{ env.NEW_VERSION }}"
+          git push origin "v${{ env.NEW_VERSION }}"
+
+  chart-update:
+    needs: version-update
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update App A Chart Repository
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PAT }}
+          script: |
+            const { execSync } = require('child_process');
+            const fs = require('fs');
+            const yaml = require('js-yaml');
+            
+            try {
+              // Clone app-a-chart repository
+              execSync('git clone https://x-access-token:${process.env.PAT}@github.com/OWNER/app-a-chart.git');
+              process.chdir('app-a-chart');
+              
+              // Read chart.yaml
+              const chart = yaml.load(fs.readFileSync('Chart.yaml', 'utf8'));
+              
+              // Update appVersion
+              chart.appVersion = process.env.NEW_VERSION;
+              
+              // Write back to file
+              fs.writeFileSync('Chart.yaml', yaml.dump(chart));
+              
+              // Commit and push changes
+              execSync('git config --global user.name "GitHub Actions"');
+              execSync('git config --global user.email "github-actions@github.com"');
+              execSync('git add Chart.yaml');
+              execSync('git commit -m "Update Chart appVersion to ' + process.env.NEW_VERSION + '"');
+              execSync('git push');
+            } catch (error) {
+              core.setFailed(`Failed to update chart: ${error.message}`);
+            }
+
+  notification:
+    needs: [version-update, chart-update]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Notify on status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const status = context.job === 'notification' ? 'completed' : 'failed';
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Build ${status}`,
+              body: `Build ${status} for commit: ${context.sha}`
+            });
+
+# 使用更细粒度的权限
+permissions:
+  contents: write
+  packages: write
+  pull-requests: write
+
+env:
+  NODE_ENV: production
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+timeout-minutes: 30
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true 

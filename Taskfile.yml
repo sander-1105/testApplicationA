@@ -1,0 +1,85 @@
+version: '3'
+
+vars:
+  REGION: "us-central1"
+  PROJECT_ID: "gmi-cloud-cicd"
+  DOCKER_REPO_NAME: "docker-dev"
+  DEFAULT_IMAGE_REPO: "{{.REGION}}-docker.pkg.dev/{{.PROJECT_ID}}/{{.DOCKER_REPO_NAME}}"
+  IMAGE_NAME:
+    sh: . ./VERSION && echo "$IMAGE_NAME"
+  VERSION:
+    sh: . ./VERSION && echo "$VERSION"
+  IMAGE_REPO:
+    sh: echo "${IMAGE_REPO:-{{.DEFAULT_IMAGE_REPO}}}"
+  IMAGE: "{{.IMAGE_REPO}}/{{.IMAGE_NAME}}:{{.VERSION}}"
+
+tasks:
+  default:
+    desc: Build and run service locally
+    cmds:
+      - task: ci:lint
+      - task: ci:test
+      - task: local:run
+
+  ci:default:
+    desc: Run all CI tasks (lint, test, and build)
+    cmds:
+      - task: ci:lint
+      - task: ci:test
+      - task: ci:build
+
+  ci:lint:
+    desc: Run linting as part of CI pipeline
+    cmds:
+      - task: (Replace lint task)
+
+  ci:test:
+    desc: Run tests as part of CI pipeline
+    cmds:
+      - task: (Replace test task)
+
+  ci:build:
+    desc: Build project as part of CI pipeline
+    cmds:
+      - task: build
+
+  release:
+    desc: Build project for release
+    cmds:
+      - task: build
+
+  local:run:
+    desc: Build and run service locally
+    deps:
+      - task: build
+    cmds:
+      - task: (Replace local run task)
+
+  build:
+    desc: Build project and create container image
+    deps:
+      - task: podman:build
+
+  cleanup:
+    desc: Remove build artifacts, container and image
+    cmds:
+      - rm -rf target
+      - task: podman:cleanup
+
+  podman:build:
+    desc: Build container image using Podman
+    cmds:
+      - echo "Build image {{.IMAGE}}"
+      - podman build --build-arg SSH_PRIVATE_KEY="{{.SSH_PRIVATE_KEY}}" --build-arg SERVICE_ACCOUNT_BASE64_FILE="{{.SERVICE_ACCOUNT_BASE64_FILE}}" -t {{.IMAGE}} .
+
+  podman:run:
+    desc: Run container locally using Podman (exposes port 8080)
+    cmds:
+      - echo "Run service locally {{.IMAGE}}"
+      - podman run -p 8080:8080 {{.IMAGE}}
+
+  podman:cleanup:
+    desc: Stop running container and remove built image
+    cmds:
+      - echo "Removing image {{.IMAGE}} and its associated containers..."
+      - podman rmi -f {{.IMAGE}} --ignore

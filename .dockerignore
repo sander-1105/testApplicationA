@@ -1,0 +1,7 @@
+**/.vscode
+**/Dockerfile
+**/README.md
+**/.dockerignore
+**/.git
+**/.github
+**/.gitignore
