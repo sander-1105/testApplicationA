@@ -1,0 +1,3 @@
+#helm-chart-ssh-url: "git@gitlab.com:product-center/<sub-group>/<Helm chart project>.git"
+helm-chart-ssh-url: "git@github.com:sander-1105/k8s-testApplicationA.git"
+
