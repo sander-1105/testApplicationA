@@ -11,12 +11,14 @@ on:
       - main
     paths:
       - '**'
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 jobs:
   version-check:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'synchronize')
     steps:
       - uses: actions/checkout@v4
         with:
@@ -212,5 +214,5 @@ env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true 
