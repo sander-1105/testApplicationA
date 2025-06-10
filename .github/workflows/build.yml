@@ -76,6 +76,7 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+          ref: main
 
       - name: Read current version
         id: read_version
@@ -111,12 +112,12 @@ jobs:
           git config --global user.name 'GitHub Actions'
           git config --global user.email 'github-actions@github.com'
           
-          # Checkout the correct branch
-          git checkout -B ${{ github.ref_name }}
+          # Ensure we're on main branch
+          git checkout main
           
           git add VERSION
           git commit -m "Bump version to ${{ env.NEW_VERSION }}"
-          git push origin ${{ github.ref_name }}
+          git push origin main
 
       - name: Create and push tag
         run: |
