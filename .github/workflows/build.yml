@@ -16,6 +16,7 @@ on:
 jobs:
   version-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -24,16 +25,27 @@ jobs:
       
       - name: Version Check
         run: |
-          if [[ $(git diff --name-only HEAD~1 HEAD) == *"VERSION"* ]]; then
-            echo "Version file changed, proceeding with build"
+          if [ ! -f "VERSION" ]; then
+            echo "Error: VERSION file not found"
+            exit 1
+          fi
+          
+          # Check if this is the first commit
+          if git rev-parse HEAD~1 >/dev/null 2>&1; then
+            if [[ $(git diff --name-only HEAD~1 HEAD) == *"VERSION"* ]]; then
+              echo "Version file changed, proceeding with build"
+            else
+              echo "No version change, skipping build"
+              exit 0
+            fi
           else
-            echo "No version change, skipping build"
-            exit 0
+            echo "First commit detected, proceeding with build"
           fi
 
   setup:
     needs: version-check
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -56,6 +68,7 @@ jobs:
   version-update:
     needs: setup
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -65,13 +78,34 @@ jobs:
       - name: Read current version
         id: read_version
         run: |
-          VERSION=$(cat VERSION | grep "export VERSION=" | cut -d'=' -f2)
+          if [ ! -f "VERSION" ]; then
+            echo "Error: VERSION file not found"
+            exit 1
+          fi
+          
+          VERSION_LINE=$(grep "export VERSION=" VERSION)
+          if [ -z "$VERSION_LINE" ]; then
+            echo "Error: VERSION line not found in VERSION file"
+            exit 1
+          fi
+          
+          VERSION=$(echo "$VERSION_LINE" | cut -d'=' -f2)
+          if [ -z "$VERSION" ]; then
+            echo "Error: Could not extract version number"
+            exit 1
+          fi
+          
           echo "CURRENT_VERSION=$VERSION" >> $GITHUB_ENV
           echo "NEW_VERSION=$(echo $VERSION | awk -F. '{$2 = $2 + 1;} 1' | sed 's/ /./g')" >> $GITHUB_ENV
 
       - name: Update version file
         run: |
-          sed -i.bak "s/export VERSION=.*/export VERSION=${{ env.NEW_VERSION }}/" VERSION && rm VERSION.bak
+          if ! sed -i.bak "s/export VERSION=.*/export VERSION=${{ env.NEW_VERSION }}/" VERSION; then
+            echo "Error: Failed to update VERSION file"
+            exit 1
+          fi
+          rm -f VERSION.bak
+          
           git config --global user.name 'GitHub Actions'
           git config --global user.email 'github-actions@github.com'
           git add VERSION
@@ -86,11 +120,20 @@ jobs:
   chart-update:
     needs: version-update
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          ssh-keyscan gitlab.com >> ~/.ssh/known_hosts
 
       - name: Update App A Chart Repository
         uses: actions/github-script@v7
@@ -102,12 +145,27 @@ jobs:
             const yaml = require('js-yaml');
             
             try {
-              // Clone app-a-chart repository
-              execSync('git clone https://x-access-token:${process.env.PAT}@github.com/OWNER/app-a-chart.git');
+              // Read helm-chart-ssh-url from ci.yml
+              const ciYaml = yaml.load(fs.readFileSync('ci.yml', 'utf8'));
+              const helmChartSshUrl = ciYaml['helm-chart-ssh-url'];
+              
+              if (!helmChartSshUrl) {
+                throw new Error('helm-chart-ssh-url not found in ci.yml');
+              }
+              
+              // Clone app-a-chart repository using SSH URL from ci.yml
+              execSync(`git clone ${helmChartSshUrl}`);
               process.chdir('app-a-chart');
               
               // Read chart.yaml
+              if (!fs.existsSync('Chart.yaml')) {
+                throw new Error('Chart.yaml not found');
+              }
+              
               const chart = yaml.load(fs.readFileSync('Chart.yaml', 'utf8'));
+              if (!chart) {
+                throw new Error('Failed to parse Chart.yaml');
+              }
               
               // Update appVersion
               chart.appVersion = process.env.NEW_VERSION;
@@ -128,6 +186,7 @@ jobs:
   notification:
     needs: [version-update, chart-update]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: always()
     steps:
       - name: Notify on status
@@ -151,8 +210,6 @@ permissions:
 env:
   NODE_ENV: production
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-timeout-minutes: 30
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
