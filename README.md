@@ -60,6 +60,15 @@ Add the following secrets to your GitHub repository (Settings > Secrets and vari
    - Used for repository operations
    - Must have appropriate permissions
 
+### Automatic Secrets
+
+1. `GITHUB_TOKEN`
+   - Automatically provided by GitHub Actions
+   - No manual setup required
+   - Used for repository operations within the workflow
+   - Has permissions based on the workflow's permission settings
+   - Automatically rotated for each workflow run
+
 ### Required Files
 
 1. `VERSION` file
@@ -131,6 +140,7 @@ To manually trigger the workflow:
    - Check if PAT has sufficient permissions
    - Ensure SSH key has correct permissions
    - Verify repository settings allow workflow access
+   - Check if GITHUB_TOKEN has required permissions
 
 4. **Notification Issues**
    - Check if issues are enabled in the repository
@@ -157,6 +167,7 @@ To manually trigger the workflow:
    - Use repository secrets for sensitive data
    - Review workflow permissions regularly
    - Keep SSH key permissions secure (600)
+   - Use GITHUB_TOKEN for internal repository operations
 
 3. **Maintenance**
    - Keep actions up to date
