@@ -116,10 +116,13 @@ jobs:
             exit 1
           fi
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
+          chmod 700 ~/.ssh
           ssh-keyscan github.com >> ~/.ssh/known_hosts
           ssh-keyscan gitlab.com >> ~/.ssh/known_hosts
+          # Test SSH connection
+          ssh -T git@github.com || true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -148,6 +151,10 @@ jobs:
               if (!helmChartSshUrl) {
                 throw new Error('helm-chart-ssh-url not found in ci.yml');
               }
+              
+              // Extract repository name from URL
+              const repoName = helmChartSshUrl.split('/').pop().replace('.git', '');
+              console.log(`Repository name: ${repoName}`);
               
               // Clone app-a-chart repository using SSH URL from ci.yml
               execSync(`git clone ${helmChartSshUrl} chart-temp`);
@@ -232,8 +239,9 @@ jobs:
             exit 1
           fi
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
+          chmod 700 ~/.ssh
           ssh-keyscan github.com >> ~/.ssh/known_hosts
           ssh-keyscan gitlab.com >> ~/.ssh/known_hosts
 
@@ -265,9 +273,13 @@ jobs:
                 throw new Error('helm-chart-ssh-url not found in ci.yml');
               }
               
+              // Extract repository name from URL
+              const repoName = helmChartSshUrl.split('/').pop().replace('.git', '');
+              console.log(`Repository name: ${repoName}`);
+              
               // Clone app-a-chart repository using SSH URL from ci.yml
               execSync(`git clone ${helmChartSshUrl}`);
-              process.chdir('app-a-chart');
+              process.chdir(repoName);
               
               // Ensure we're on main branch
               execSync('git checkout main');
@@ -297,37 +309,7 @@ jobs:
             } catch (error) {
               core.setFailed(`Failed to update chart: ${error.message}`);
             }
-
-  notification:
-    needs: [version-update, chart-update]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    if: always()
-    permissions:
-      issues: write
-      contents: read
-    steps:
-      - name: Notify on status
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            try {
-              const status = context.job === 'notification' ? 'completed' : 'failed';
-              const title = `Build ${status}`;
-              const body = `Build ${status} for commit: ${context.sha}\n\nWorkflow: ${context.workflow}\nRun ID: ${context.runId}`;
-              
-              await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: title,
-                body: body
-              });
-            } catch (error) {
-              console.error('Failed to create issue:', error.message);
-              // Don't fail the workflow if notification fails
-            }
-
+            
 # 使用更细粒度的权限
 permissions:
   contents: write
