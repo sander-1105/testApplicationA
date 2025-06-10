@@ -10,7 +10,7 @@ This repository uses GitHub Actions for continuous integration and deployment. T
 ### Trigger Conditions
 The workflow is triggered on:
 - Push to `main` branch
-- Pull requests to `main` branch
+- Pull requests to `main` branch (only on opened and reopened)
 - Manual trigger (workflow_dispatch)
 
 ### Jobs
@@ -19,6 +19,7 @@ The workflow is triggered on:
 - Checks if the VERSION file has been modified
 - Skips the build if no version changes are detected
 - Handles first commit scenarios appropriately
+- Only runs on push events or PR open/reopen events
 
 #### 2. Setup
 - Sets up Python environment
@@ -30,15 +31,19 @@ The workflow is triggered on:
 - Increments the version number
 - Updates the VERSION file
 - Creates and pushes a new version tag
+- Ensures proper branch checkout before pushing changes
 
 #### 4. Chart Update
 - Updates the Helm chart repository
 - Synchronizes the new version with the chart
 - Uses SSH for secure repository access
+- Handles SSH key setup automatically
 
 #### 5. Notification
-- Sends build status notifications
-- Creates GitHub issues for build results
+- Sends build status notifications via GitHub Issues
+- Includes detailed build information
+- Gracefully handles notification failures
+- Provides workflow and run context
 
 ## Prerequisites
 
@@ -48,10 +53,12 @@ Add the following secrets to your GitHub repository (Settings > Secrets and vari
 1. `SSH_PRIVATE_KEY`
    - SSH private key for accessing the Helm chart repository
    - Used for secure Git operations
+   - Must have access to the Helm chart repository
 
 2. `PAT` (Personal Access Token)
    - GitHub Personal Access Token
    - Used for repository operations
+   - Must have appropriate permissions
 
 ### Required Files
 
@@ -71,13 +78,14 @@ The workflow requires the following permissions:
 - `contents: write` - For pushing code and tags
 - `packages: write` - For package operations
 - `pull-requests: write` - For creating notifications
+- `issues: write` - For creating build status issues
 
 ## Concurrency Control
 
 The workflow implements concurrency control to:
 - Prevent parallel runs of the same workflow
 - Cancel in-progress runs when new commits are pushed
-- Group runs by workflow and branch
+- Group runs by workflow and PR number (for PRs) or branch (for pushes)
 
 ## Timeout Settings
 
@@ -91,6 +99,7 @@ The workflow includes comprehensive error handling:
 - Git operation error handling
 - SSH connection error handling
 - Chart update error handling
+- Notification error handling (non-blocking)
 
 ## Manual Trigger
 
@@ -109,22 +118,31 @@ To manually trigger the workflow:
    - Check if VERSION file exists and has correct format
    - Verify repository permissions
    - Check if version number is valid
+   - Ensure proper branch checkout
 
 2. **Chart Update Fails**
    - Verify SSH_PRIVATE_KEY secret is correctly set
    - Check if helm-chart-ssh-url in ci.yml is correct
    - Ensure SSH key has access to the chart repository
+   - Check SSH key permissions (should be 600)
 
 3. **Permission Issues**
    - Verify all required permissions are set
    - Check if PAT has sufficient permissions
    - Ensure SSH key has correct permissions
+   - Verify repository settings allow workflow access
+
+4. **Notification Issues**
+   - Check if issues are enabled in the repository
+   - Verify workflow has issues:write permission
+   - Check GitHub token permissions
 
 ### Logs and Debugging
 
 - Check the Actions tab in GitHub for detailed logs
 - Each job provides step-by-step execution logs
 - Error messages are clearly displayed in the workflow run
+- Notification failures are logged but don't fail the workflow
 
 ## Best Practices
 
@@ -132,13 +150,22 @@ To manually trigger the workflow:
    - Always update VERSION file for new releases
    - Follow semantic versioning (x.y.z)
    - Commit version changes separately
+   - Ensure proper branch checkout before pushing
 
 2. **Security**
    - Regularly rotate SSH keys and PAT
    - Use repository secrets for sensitive data
    - Review workflow permissions regularly
+   - Keep SSH key permissions secure (600)
 
 3. **Maintenance**
    - Keep actions up to date
    - Monitor workflow execution times
    - Review and update timeout settings as needed
+   - Regularly check notification delivery
+
+4. **PR Management**
+   - Use PR templates if needed
+   - Review PR checks before merging
+   - Monitor build notifications
+   - Keep PR branches up to date
