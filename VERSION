@@ -1,2 +1,2 @@
 export IMAGE_NAME=test/application
-export VERSION=0.7.0
+export VERSION=0.8.0
