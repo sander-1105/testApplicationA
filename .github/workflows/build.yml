@@ -1,0 +1,373 @@
+name: Build and Version Management
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '**'
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+jobs:
+  version-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Version Check
+        run: |
+          if [ ! -f "VERSION" ]; then
+            echo "Error: VERSION file not found"
+            exit 1
+          fi
+          
+          # Check if this is the first commit
+          if git rev-parse HEAD~1 >/dev/null 2>&1; then
+            if [[ $(git diff --name-only HEAD~1 HEAD) == *"VERSION"* ]]; then
+              echo "Version file changed, proceeding with build"
+            else
+              echo "No version change, but proceeding with build for other file changes"
+            fi
+          else
+            echo "First commit detected, proceeding with build"
+          fi
+
+  setup:
+    needs: version-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      current_version: ${{ steps.read_version.outputs.current_version }}
+      new_version: ${{ steps.read_version.outputs.new_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read current version
+        id: read_version
+        run: |
+          if [ ! -f "VERSION" ]; then
+            echo "Error: VERSION file not found"
+            exit 1
+          fi
+          
+          VERSION_LINE=$(grep "export VERSION=" VERSION)
+          if [ -z "$VERSION_LINE" ]; then
+            echo "Error: VERSION line not found in VERSION file"
+            exit 1
+          fi
+          
+          VERSION=$(echo "$VERSION_LINE" | cut -d'=' -f2)
+          if [ -z "$VERSION" ]; then
+            echo "Error: Could not extract version number"
+            exit 1
+          fi
+          
+          NEW_VERSION=$(echo $VERSION | awk -F. '{$2 = $2 + 1;} 1' | sed 's/ /./g')
+          
+          echo "current_version=$VERSION" >> $GITHUB_OUTPUT
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.npm
+            node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+  chart-validation:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.base_ref == 'main')
+    env:
+      NEW_VERSION: ${{ needs.setup.outputs.new_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: main
+
+      - name: Setup SSH
+        run: |
+          if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+            echo "Error: SSH_PRIVATE_KEY secret not found"
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          chmod 700 ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          ssh-keyscan gitlab.com >> ~/.ssh/known_hosts
+          # Test SSH connection
+          ssh -T git@github.com || true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          npm init -y
+          npm install js-yaml
+
+      - name: Validate Chart Repository Access
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { execSync } = require('child_process');
+            const fs = require('fs');
+            const yaml = require('js-yaml');
+            
+            try {
+              // Read helm-chart-ssh-url from ci.yml
+              const ciYaml = yaml.load(fs.readFileSync('ci.yml', 'utf8'));
+              const helmChartSshUrl = ciYaml['helm-chart-ssh-url'];
+              
+              if (!helmChartSshUrl) {
+                throw new Error('helm-chart-ssh-url not found in ci.yml');
+              }
+              
+              // Extract repository name from URL
+              const repoName = helmChartSshUrl.split('/').pop().replace('.git', '');
+              console.log(`Repository name: ${repoName}`);
+              
+              // Clone app-a-chart repository using SSH URL from ci.yml
+              execSync(`git clone ${helmChartSshUrl} chart-temp`);
+              process.chdir('chart-temp');
+              
+              // Ensure we're on main branch
+              execSync('git checkout main');
+              
+              // Read chart.yaml
+              if (!fs.existsSync('Chart.yaml')) {
+                throw new Error('Chart.yaml not found');
+              }
+              
+              const chart = yaml.load(fs.readFileSync('Chart.yaml', 'utf8'));
+              if (!chart) {
+                throw new Error('Failed to parse Chart.yaml');
+              }
+              
+              console.log('Chart validation successful');
+              console.log(`Current appVersion: ${chart.appVersion}`);
+              console.log(`New appVersion will be: ${process.env.NEW_VERSION}`);
+            } catch (error) {
+              core.setFailed(`Chart validation failed: ${error.message}`);
+            }
+
+  version-update:
+    needs: [setup, chart-validation]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.base_ref == 'main')
+    env:
+      CURRENT_VERSION: ${{ needs.setup.outputs.current_version }}
+      NEW_VERSION: ${{ needs.setup.outputs.new_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: main
+
+      - name: Update version file
+        run: |
+          if ! sed -i.bak "s/export VERSION=.*/export VERSION=${{ env.NEW_VERSION }}/" VERSION; then
+            echo "Error: Failed to update VERSION file"
+            exit 1
+          fi
+          rm -f VERSION.bak
+          
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'github-actions@github.com'
+          
+          # Ensure we're on main branch
+          git checkout main
+          
+          git add VERSION
+          git commit -m "Bump version to ${{ env.NEW_VERSION }}"
+          git push origin main
+
+      - name: Create and push tag
+        run: |
+          git tag -a "v${{ env.NEW_VERSION }}" -m "Release version ${{ env.NEW_VERSION }}"
+          git push origin "v${{ env.NEW_VERSION }}"
+
+  chart-update:
+    needs: [setup, version-update]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.base_ref == 'main')
+    env:
+      NEW_VERSION: ${{ needs.setup.outputs.new_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: main
+
+      - name: Setup SSH
+        run: |
+          if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+            echo "Error: SSH_PRIVATE_KEY secret not found"
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          chmod 700 ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          ssh-keyscan gitlab.com >> ~/.ssh/known_hosts
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          npm init -y
+          npm install js-yaml
+
+      - name: Update App A Chart Repository
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { execSync } = require('child_process');
+            const fs = require('fs');
+            const yaml = require('js-yaml');
+            
+            try {
+              // Read helm-chart-ssh-url from ci.yml
+              const ciYaml = yaml.load(fs.readFileSync('ci.yml', 'utf8'));
+              const helmChartSshUrl = ciYaml['helm-chart-ssh-url'];
+              
+              if (!helmChartSshUrl) {
+                throw new Error('helm-chart-ssh-url not found in ci.yml');
+              }
+              
+              // Extract repository name from URL
+              const repoName = helmChartSshUrl.split('/').pop().replace('.git', '');
+              console.log(`Repository name: ${repoName}`);
+              
+              // Clone app-a-chart repository using SSH URL from ci.yml
+              execSync(`git clone ${helmChartSshUrl}`);
+              process.chdir(repoName);
+              
+              // Ensure we're on main branch
+              execSync('git checkout main');
+              
+              // Read chart.yaml
+              if (!fs.existsSync('Chart.yaml')) {
+                throw new Error('Chart.yaml not found');
+              }
+              
+              const chart = yaml.load(fs.readFileSync('Chart.yaml', 'utf8'));
+              if (!chart) {
+                throw new Error('Failed to parse Chart.yaml');
+              }
+              
+              // Update appVersion
+              chart.appVersion = process.env.NEW_VERSION;
+              
+              // Write back to file
+              fs.writeFileSync('Chart.yaml', yaml.dump(chart));
+              
+              // Commit and push changes
+              execSync('git config --global user.name "GitHub Actions"');
+              execSync('git config --global user.email "github-actions@github.com"');
+              execSync('git add Chart.yaml');
+              execSync('git commit -m "Update Chart appVersion to ' + process.env.NEW_VERSION + '"');
+              execSync('git push origin main');
+            } catch (error) {
+              core.setFailed(`Failed to update chart: ${error.message}`);
+            }
+
+  docker-build:
+    needs: [setup, version-update]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.base_ref == 'main')
+    env:
+      NEW_VERSION: ${{ needs.setup.outputs.new_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: main
+
+      - name: Install Task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+#      - name: Authenticate to Google Cloud
+#        uses: google-github-actions/auth@v2
+#        with:
+#          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+#          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+#      - name: Configure Google Cloud CLI
+#        uses: google-github-actions/setup-gcloud@v2
+
+#      - name: Configure Docker to use gcloud as credential helper
+#        run: |
+#          gcloud auth configure-docker asia-east1-docker.pkg.dev
+
+      - name: Build Docker image using Task
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SERVICE_ACCOUNT_BASE64_FILE: ${{ secrets.SERVICE_ACCOUNT_BASE64_FILE }}
+        run: |
+          task docker:build
+
+#      - name: Push Docker image using Task
+#        run: |
+#          task docker:push
+
+# Use fine-grained permissions
+permissions:
+  contents: write
+  packages: write
+  pull-requests: write
+  issues: write
+
+env:
+  NODE_ENV: production
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true 
