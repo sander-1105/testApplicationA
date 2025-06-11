@@ -7,6 +7,170 @@ This repository uses GitHub Actions for continuous integration and deployment. T
 
 ## Workflow Structure
 
+### 🚀 Pipeline Flow Diagram
+
+```mermaid
+graph TD
+    A[📤 Push to main branch] --> B[🔍 version-check]
+    B --> |"✅ VERSION file changed?"| C[⚙️ setup]
+    B --> |"❌ No VERSION change"| Z[🚫 Skip build]
+    
+    C --> |"📊 Read current version<br/>🧮 Calculate new version"| D[✅ chart-validation]
+    C --> E[📝 version-update]
+    
+    D --> |"🔐 Validate Helm Chart<br/>🔗 repository access"| E
+    
+    E --> |"📄 Update VERSION file<br/>📝 Create git commit<br/>⬆️ Push to main<br/>🏷️ Create git tag"| F[📋 chart-update]
+    E --> G[🐳 docker-build]
+    
+    F --> |"⚙️ Update Helm Chart<br/>📦 appVersion"| H[🎉 Pipeline Complete]
+    G --> |"🔨 Build Docker image<br/>⚠️ (no push currently)"| H
+    
+    subgraph "🔒 Security & Conditions"
+        I["🛡️ Only on main branch<br/>✅ AND success()"]
+    end
+    
+    subgraph "⚡ Parallel Execution Phase"
+        F
+        G
+    end
+    
+    D -.-> I
+    E -.-> I
+    F -.-> I
+    G -.-> I
+    
+    style A fill:#e1f5fe,stroke:#01579b,stroke-width:3px
+    style C fill:#f3e5f5,stroke:#4a148c,stroke-width:3px
+    style E fill:#fff3e0,stroke:#e65100,stroke-width:3px
+    style F fill:#e8f5e8,stroke:#1b5e20,stroke-width:3px
+    style G fill:#e8f5e8,stroke:#1b5e20,stroke-width:3px
+    style H fill:#f1f8e9,stroke:#33691e,stroke-width:3px
+    style Z fill:#ffebee,stroke:#b71c1c,stroke-width:3px
+```
+
+### 📋 Detailed Pipeline Steps
+
+```mermaid
+graph TD
+    A[📤 Push to main] --> B[🔍 version-check]
+    
+    subgraph "1️⃣ Version Check Phase"
+        B1["📁 Check VERSION file exists"]
+        B2["🔍 Check if VERSION changed<br/>in this commit"]
+        B --> B1 --> B2
+        B2 --> |"✅ Changed"| B3["🚀 Proceed"]
+        B2 --> |"❌ No change"| B4["🚫 Skip build"]
+    end
+    
+    B3 --> C[⚙️ setup]
+    
+    subgraph "2️⃣ Setup & Configuration"
+        C1["📖 Read: export VERSION=0.0.0"]
+        C2["🧮 Calculate: NEW_VERSION=0.1.0"]
+        C3["📤 Output variables"]
+        C --> C1 --> C2 --> C3
+    end
+    
+    C3 --> D[✅ chart-validation]
+    C3 --> E[📝 version-update]
+    
+    subgraph "3️⃣ Chart Validation"
+        D1["🔐 Setup SSH keys"]
+        D2["📥 Clone Helm Chart repo"]  
+        D3["✅ Validate Chart.yaml"]
+        D --> D1 --> D2 --> D3
+    end
+    
+    subgraph "4️⃣ Version Update"
+        E1["📝 Update VERSION file:<br/>export VERSION=0.1.0"]
+        E2["📝 Git commit & push"]
+        E3["🏷️ Create tag: v0.1.0"]
+        E --> E1 --> E2 --> E3
+    end
+    
+    D3 --> E
+    E3 --> F[📋 chart-update]
+    E3 --> G[🐳 docker-build]
+    
+    subgraph "5️⃣ Chart Update (Parallel)"
+        F1["📥 Clone Helm Chart repo"]
+        F2["⚙️ Update Chart.yaml:<br/>📦 appVersion: 0.1.0"]
+        F3["📤 Git commit & push"]
+        F --> F1 --> F2 --> F3
+    end
+    
+    subgraph "6️⃣ Docker Build (Parallel)"
+        G1["🛠️ Install Task tool"]
+        G2["🐳 Setup Docker Buildx"]
+        G3["🔨 task docker:build<br/>🏷️ Image: ...application:0.1.0"]
+        G4["✅ Build Complete<br/>⚠️ (Push currently disabled)"]
+        G --> G1 --> G2 --> G3 --> G4
+    end
+    
+    F3 --> H[🎉 Pipeline Complete]
+    G4 --> H
+    
+    style A fill:#e3f2fd,stroke:#01579b,stroke-width:3px
+    style C fill:#f3e5f5,stroke:#4a148c,stroke-width:3px
+    style E fill:#fff3e0,stroke:#e65100,stroke-width:3px
+    style F fill:#e8f5e8,stroke:#1b5e20,stroke-width:3px
+    style G fill:#e8f5e8,stroke:#1b5e20,stroke-width:3px
+    style H fill:#f1f8e9,stroke:#33691e,stroke-width:3px
+    style B4 fill:#ffebee,stroke:#b71c1c,stroke-width:3px
+```
+
+### 📊 Visual Flow Summary
+
+```
+🔄 GitHub Actions CI/CD Pipeline Flow
+════════════════════════════════════════════════════════════════
+
+📤 Push to main
+     │
+     ▼
+🔍 version-check ────────❌ No VERSION change ──► 🚫 Skip build
+     │
+     ▼ ✅ VERSION changed
+⚙️ setup (Read version: 0.0.0 → Calculate: 0.1.0)
+     │
+     ├─────────────────────┐
+     ▼                     ▼
+✅ chart-validation    📝 version-update
+     │                     │
+     └──────► ✅ ──────────┤
+                           │
+                           ├─────────┬─────────┐
+                           ▼         ▼         ▼
+                      🏷️ Create   📋 chart   🐳 docker
+                         tag      update     build
+                           │         │         │
+                           └─────────┴────┬────┘
+                                          ▼
+                                   🎉 Pipeline Complete
+
+Legend:
+══════
+🔍 Validation    📝 Update    📋 Deploy    🐳 Build    ✅ Success    ❌ Skip
+```
+
+### 📈 Pipeline Execution Matrix
+
+| Phase | Job | Duration | Dependencies | Parallel | Status | Output |
+|-------|-----|----------|--------------|----------|--------|--------|
+| 🔍 **Check** | `version-check` | ~1min | - | ❌ | Required | Validates VERSION change |
+| ⚙️ **Setup** | `setup` | ~2min | version-check | ❌ | Required | `current_version`, `new_version` |
+| ✅ **Validate** | `chart-validation` | ~3min | setup | ❌ | Required | Chart repo access verified |
+| 📝 **Update** | `version-update` | ~2min | setup + chart-validation | ❌ | Critical | VERSION file updated, tag created |
+| 📋 **Deploy** | `chart-update` | ~3min | version-update | ✅ | Optional | Helm chart synchronized |
+| 🐳 **Build** | `docker-build` | ~5min | version-update | ✅ | Optional | Docker image built |
+
+**Legend:**
+- ✅ = Can run in parallel
+- ❌ = Must run sequentially  
+- **Critical** = Pipeline fails if this fails
+- **Optional** = Pipeline continues if this fails
+
 ### Trigger Conditions
 The workflow is triggered on:
 - Push to `main` branch
@@ -41,12 +205,20 @@ The workflow is triggered on:
 - Commits changes directly to main branch
 - **Protected**: Will not run if any validation fails
 
-#### 5. Chart Update
+#### 5. Chart Update (Parallel)
 - **Only executes after successful version update**
 - Updates the Helm chart repository
 - Synchronizes new version with chart appVersion
 - Uses SSH for secure repository access
 - Commits and pushes chart changes
+
+#### 6. Docker Build (Parallel)
+- **Only executes after successful version update**
+- Installs Task tool for build automation
+- Sets up Docker Buildx for container building
+- Builds Docker image using Taskfile configuration
+- **Note**: Image push is currently disabled
+- Uses environment variable for version tagging
 
 ## Prerequisites
 
