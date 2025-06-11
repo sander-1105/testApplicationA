@@ -1,14 +1,14 @@
 version: '3'
 
 vars:
-  REGION: "us-central1"
-  PROJECT_ID: "gmi-cloud-cicd"
-  DOCKER_REPO_NAME: "docker-dev"
+  REGION: "asia-east1"
+  PROJECT_ID: "devv-vendor"
+  DOCKER_REPO_NAME: "dev-billing"
   DEFAULT_IMAGE_REPO: "{{.REGION}}-docker.pkg.dev/{{.PROJECT_ID}}/{{.DOCKER_REPO_NAME}}"
   IMAGE_NAME:
     sh: . ./VERSION && echo "$IMAGE_NAME"
   VERSION:
-    sh: . ./VERSION && echo "$VERSION"
+    sh: echo "${NEW_VERSION:-$(. ./VERSION && echo "$VERSION")}"
   IMAGE_REPO:
     sh: echo "${IMAGE_REPO:-{{.DEFAULT_IMAGE_REPO}}}"
   IMAGE: "{{.IMAGE_REPO}}/{{.IMAGE_NAME}}:{{.VERSION}}"
@@ -58,28 +58,35 @@ tasks:
   build:
     desc: Build project and create container image
     deps:
-      - task: podman:build
+      - task: docker:build
 
   cleanup:
     desc: Remove build artifacts, container and image
     cmds:
       - rm -rf target
-      - task: podman:cleanup
+      - task: docker:cleanup
 
-  podman:build:
-    desc: Build container image using Podman
+  # Docker tasks for GitHub Actions
+  docker:build:
+    desc: Build container image using Docker
     cmds:
       - echo "Build image {{.IMAGE}}"
-      - podman build --build-arg SSH_PRIVATE_KEY="{{.SSH_PRIVATE_KEY}}" --build-arg SERVICE_ACCOUNT_BASE64_FILE="{{.SERVICE_ACCOUNT_BASE64_FILE}}" -t {{.IMAGE}} .
+      - docker build --build-arg SSH_PRIVATE_KEY="{{.SSH_PRIVATE_KEY}}" --build-arg SERVICE_ACCOUNT_BASE64_FILE="{{.SERVICE_ACCOUNT_BASE64_FILE}}" -t {{.IMAGE}} .
 
-  podman:run:
-    desc: Run container locally using Podman (exposes port 8080)
+  docker:run:
+    desc: Run container locally using Docker (exposes port 8080)
     cmds:
       - echo "Run service locally {{.IMAGE}}"
-      - podman run -p 8080:8080 {{.IMAGE}}
+      - docker run -p 8080:8080 {{.IMAGE}}
 
-  podman:cleanup:
+  docker:cleanup:
     desc: Stop running container and remove built image
     cmds:
       - echo "Removing image {{.IMAGE}} and its associated containers..."
-      - podman rmi -f {{.IMAGE}} --ignore
+      - docker rmi -f {{.IMAGE}} || true
+
+  docker:push:
+    desc: Push container image to registry
+    cmds:
+      - echo "Pushing image {{.IMAGE}}"
+      - docker push {{.IMAGE}}
