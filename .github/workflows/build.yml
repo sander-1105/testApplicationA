@@ -99,7 +99,7 @@ jobs:
     needs: setup
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.base_ref == 'main')
     env:
       NEW_VERSION: ${{ needs.setup.outputs.new_version }}
     steps:
@@ -184,7 +184,7 @@ jobs:
     needs: [setup, chart-validation]
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    if: github.ref == 'refs/heads/main' && success()
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.base_ref == 'main')
     env:
       CURRENT_VERSION: ${{ needs.setup.outputs.current_version }}
       NEW_VERSION: ${{ needs.setup.outputs.new_version }}
@@ -222,7 +222,7 @@ jobs:
     needs: [setup, version-update]
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    if: github.ref == 'refs/heads/main' && success()
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.base_ref == 'main')
     env:
       NEW_VERSION: ${{ needs.setup.outputs.new_version }}
     steps:
@@ -314,7 +314,7 @@ jobs:
     needs: [setup, version-update]
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    if: github.ref == 'refs/heads/main' && success()
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.base_ref == 'main')
     env:
       NEW_VERSION: ${{ needs.setup.outputs.new_version }}
     steps:
