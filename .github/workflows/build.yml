@@ -159,7 +159,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           ref: main
 
-      - name: Update version file
+      - name: Update version file,create and push tag.
         run: |
           if ! sed -i.bak "s/export VERSION=.*/export VERSION=${{ env.NEW_VERSION }}/" VERSION; then
             echo "Error: Failed to update VERSION file"
@@ -175,12 +175,9 @@ jobs:
           
           git add VERSION
           git commit -m "Bump version to ${{ env.NEW_VERSION }}"
-          git push origin main
 
-      - name: Create and push tag
-        run: |
           git tag -a "v${{ env.NEW_VERSION }}" -m "Release version ${{ env.NEW_VERSION }}"
-          git push origin "v${{ env.NEW_VERSION }}"
+          git push origin --tags --atomic
 
   docker-build:
     needs: [pre-check, version-update]
@@ -311,4 +308,4 @@ jobs:
           git config --global user.email "github-actions@github.com"
           git add .
           git commit -m "Update Chart appVersion to $NEW_VERSION and imageTag to $NEW_VERSION"
-          git push origin main 
+          git push origin main --tags --atomic
