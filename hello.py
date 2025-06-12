@@ -1,14 +1,12 @@
 def hello():
     print('hello world!')
+    print('hello world!')
 
 def helloworld():
     print('hello world!')
-
-# test line1
-# test line2
-# test line3
-# test line4
-# test line5
+    print('hello world aaaa!')
+    print('hello world aaaa!')
+    print('hello world aaaa!')
 
 if __name__ == '__main__':
     hello()
