@@ -22,9 +22,12 @@ permissions:
   issues: write
 
 jobs:
-  version-check:
+  pre-check:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      current_version: ${{ steps.read_version.outputs.current_version }}
+      new_version: ${{ steps.read_version.outputs.new_version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -32,6 +35,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Version Check
+        id: read_version
         run: |
           if [ ! -f "VERSION" ]; then
             echo "Error: VERSION file not found"
@@ -47,27 +51,6 @@ jobs:
             fi
           else
             echo "First commit detected, proceeding with build"
-          fi
-
-  setup:
-    needs: version-check
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    outputs:
-      current_version: ${{ steps.read_version.outputs.current_version }}
-      new_version: ${{ steps.read_version.outputs.new_version }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Read current version
-        id: read_version
-        run: |
-          if [ ! -f "VERSION" ]; then
-            echo "Error: VERSION file not found"
-            exit 1
           fi
           
           VERSION_LINE=$(grep "export VERSION=" VERSION)
@@ -103,12 +86,12 @@ jobs:
             ${{ runner.os }}-node-
 
   chart-validation:
-    needs: setup
+    needs: pre-check
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.base_ref == 'main')
     env:
-      NEW_VERSION: ${{ needs.setup.outputs.new_version }}
+      NEW_VERSION: ${{ needs.pre-check.outputs.new_version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -188,13 +171,13 @@ jobs:
             }
 
   version-update:
-    needs: [setup, chart-validation]
+    needs: [pre-check, chart-validation]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.base_ref == 'main')
     env:
-      CURRENT_VERSION: ${{ needs.setup.outputs.current_version }}
-      NEW_VERSION: ${{ needs.setup.outputs.new_version }}
+      CURRENT_VERSION: ${{ needs.pre-check.outputs.current_version }}
+      NEW_VERSION: ${{ needs.pre-check.outputs.new_version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -226,12 +209,12 @@ jobs:
           git push origin "v${{ env.NEW_VERSION }}"
 
   chart-update:
-    needs: [setup, version-update]
+    needs: [pre-check, version-update]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.base_ref == 'main')
     env:
-      NEW_VERSION: ${{ needs.setup.outputs.new_version }}
+      NEW_VERSION: ${{ needs.pre-check.outputs.new_version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -318,12 +301,12 @@ jobs:
             }
 
   docker-build:
-    needs: [setup, version-update]
+    needs: [pre-check, version-update]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.base_ref == 'main')
     env:
-      NEW_VERSION: ${{ needs.setup.outputs.new_version }}
+      NEW_VERSION: ${{ needs.pre-check.outputs.new_version }}
     steps:
       - uses: actions/checkout@v4
         with:
