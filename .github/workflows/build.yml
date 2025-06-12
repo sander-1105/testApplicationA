@@ -14,12 +14,19 @@ on:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 
-# Add permissions block at the top level
 permissions:
   contents: write
   packages: write
   pull-requests: write
   issues: write
+
+env:
+  NODE_ENV: production
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   pre-check:
@@ -114,61 +121,47 @@ jobs:
           # Test SSH connection
           ssh -T git@github.com || true
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install dependencies
+      - name: Install yq
         run: |
-          npm init -y
-          npm install js-yaml
+          wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x /usr/local/bin/yq
 
       - name: Validate Chart Repository Access
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const { execSync } = require('child_process');
-            const fs = require('fs');
-            const yaml = require('js-yaml');
-            
-            try {
-              // Read helm-chart-ssh-url from ci.yml
-              const ciYaml = yaml.load(fs.readFileSync('ci.yml', 'utf8'));
-              const helmChartSshUrl = ciYaml['helm-chart-ssh-url'];
-              
-              if (!helmChartSshUrl) {
-                throw new Error('helm-chart-ssh-url not found in ci.yml');
-              }
-              
-              // Extract repository name from URL
-              const repoName = helmChartSshUrl.split('/').pop().replace('.git', '');
-              console.log(`Repository name: ${repoName}`);
-              
-              // Clone app-a-chart repository using SSH URL from ci.yml
-              execSync(`git clone ${helmChartSshUrl} chart-temp`);
-              process.chdir('chart-temp');
-              
-              // Ensure we're on main branch
-              execSync('git checkout main');
-              
-              // Read chart.yaml
-              if (!fs.existsSync('Chart.yaml')) {
-                throw new Error('Chart.yaml not found');
-              }
-              
-              const chart = yaml.load(fs.readFileSync('Chart.yaml', 'utf8'));
-              if (!chart) {
-                throw new Error('Failed to parse Chart.yaml');
-              }
-              
-              console.log('Chart validation successful');
-              console.log(`Current appVersion: ${chart.appVersion}`);
-              console.log(`New appVersion will be: ${process.env.NEW_VERSION}`);
-            } catch (error) {
-              core.setFailed(`Chart validation failed: ${error.message}`);
-            }
+        run: |
+          # Read helm-chart-ssh-url from ci.yml
+          HELM_CHART_SSH_URL=$(yq e '.helm-chart-ssh-url' ci.yml)
+          if [ -z "$HELM_CHART_SSH_URL" ]; then
+            echo "Error: helm-chart-ssh-url not found in ci.yml"
+            exit 1
+          fi
+          
+          # Extract repository name from URL
+          REPO_NAME=$(basename "$HELM_CHART_SSH_URL" .git)
+          echo "Repository name: $REPO_NAME"
+          
+          # Clone chart repository
+          git clone "$HELM_CHART_SSH_URL" chart-temp
+          cd chart-temp
+          
+          # Ensure we're on main branch
+          git checkout main
+          
+          # Validate Chart.yaml
+          if [ ! -f "Chart.yaml" ]; then
+            echo "Error: Chart.yaml not found"
+            exit 1
+          fi
+          
+          # Read current appVersion
+          CURRENT_VERSION=$(yq e '.appVersion' Chart.yaml)
+          if [ -z "$CURRENT_VERSION" ]; then
+            echo "Error: Could not read appVersion from Chart.yaml"
+            exit 1
+          fi
+          
+          echo "Chart validation successful"
+          echo "Current appVersion: $CURRENT_VERSION"
+          echo "New appVersion will be: $NEW_VERSION"
 
   version-update:
     needs: [pre-check, chart-validation]
@@ -207,98 +200,6 @@ jobs:
         run: |
           git tag -a "v${{ env.NEW_VERSION }}" -m "Release version ${{ env.NEW_VERSION }}"
           git push origin "v${{ env.NEW_VERSION }}"
-
-  chart-update:
-    needs: [pre-check, version-update]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.base_ref == 'main')
-    env:
-      NEW_VERSION: ${{ needs.pre-check.outputs.new_version }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-          ref: main
-
-      - name: Setup SSH
-        run: |
-          if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
-            echo "Error: SSH_PRIVATE_KEY secret not found"
-            exit 1
-          fi
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          chmod 700 ~/.ssh
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-          ssh-keyscan gitlab.com >> ~/.ssh/known_hosts
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install dependencies
-        run: |
-          npm init -y
-          npm install js-yaml
-
-      - name: Update App A Chart Repository
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const { execSync } = require('child_process');
-            const fs = require('fs');
-            const yaml = require('js-yaml');
-            
-            try {
-              // Read helm-chart-ssh-url from ci.yml
-              const ciYaml = yaml.load(fs.readFileSync('ci.yml', 'utf8'));
-              const helmChartSshUrl = ciYaml['helm-chart-ssh-url'];
-              
-              if (!helmChartSshUrl) {
-                throw new Error('helm-chart-ssh-url not found in ci.yml');
-              }
-              
-              // Extract repository name from URL
-              const repoName = helmChartSshUrl.split('/').pop().replace('.git', '');
-              console.log(`Repository name: ${repoName}`);
-              
-              // Clone app-a-chart repository using SSH URL from ci.yml
-              execSync(`git clone ${helmChartSshUrl}`);
-              process.chdir(repoName);
-              
-              // Ensure we're on main branch
-              execSync('git checkout main');
-              
-              // Read chart.yaml
-              if (!fs.existsSync('Chart.yaml')) {
-                throw new Error('Chart.yaml not found');
-              }
-              
-              const chart = yaml.load(fs.readFileSync('Chart.yaml', 'utf8'));
-              if (!chart) {
-                throw new Error('Failed to parse Chart.yaml');
-              }
-              
-              // Update appVersion
-              chart.appVersion = process.env.NEW_VERSION;
-              
-              // Write back to file
-              fs.writeFileSync('Chart.yaml', yaml.dump(chart));
-              
-              // Commit and push changes
-              execSync('git config --global user.name "GitHub Actions"');
-              execSync('git config --global user.email "github-actions@github.com"');
-              execSync('git add Chart.yaml');
-              execSync('git commit -m "Update Chart appVersion to ' + process.env.NEW_VERSION + '"');
-              execSync('git push origin main');
-            } catch (error) {
-              core.setFailed(`Failed to update chart: ${error.message}`);
-            }
 
   docker-build:
     needs: [pre-check, version-update]
@@ -347,10 +248,64 @@ jobs:
 #        run: |
 #          task docker:push
 
-env:
-  NODE_ENV: production
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  chart-update:
+    needs: [pre-check, version-update, docker-build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.base_ref == 'main')
+    env:
+      NEW_VERSION: ${{ needs.pre-check.outputs.new_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: main
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true 
+      - name: Setup SSH
+        run: |
+          if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+            echo "Error: SSH_PRIVATE_KEY secret not found"
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          chmod 700 ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          ssh-keyscan gitlab.com >> ~/.ssh/known_hosts
+
+      - name: Install yq
+        run: |
+          wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x /usr/local/bin/yq
+
+      - name: Update App A Chart Repository
+        run: |
+          # Read helm-chart-ssh-url from ci.yml
+          HELM_CHART_SSH_URL=$(yq e '.helm-chart-ssh-url' ci.yml)
+          if [ -z "$HELM_CHART_SSH_URL" ]; then
+            echo "Error: helm-chart-ssh-url not found in ci.yml"
+            exit 1
+          fi
+          
+          # Extract repository name from URL
+          REPO_NAME=$(basename "$HELM_CHART_SSH_URL" .git)
+          echo "Repository name: $REPO_NAME"
+          
+          # Clone chart repository
+          git clone "$HELM_CHART_SSH_URL"
+          cd "$REPO_NAME"
+          
+          # Ensure we're on main branch
+          git checkout main
+          
+          # Update appVersion in Chart.yaml
+          yq e -i ".appVersion = \"$NEW_VERSION\"" Chart.yaml
+          
+          # Commit and push changes
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "github-actions@github.com"
+          git add Chart.yaml
+          git commit -m "Update Chart appVersion to $NEW_VERSION"
+          git push origin main 
