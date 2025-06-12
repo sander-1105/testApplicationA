@@ -264,15 +264,51 @@ jobs:
           # Ensure we're on main branch
           git checkout main
           
+          # Check if Chart.yaml exists
+          if [ ! -f "Chart.yaml" ]; then
+            echo "Error: Chart.yaml not found"
+            exit 1
+          fi
+          
+          # Check if values.yaml exists
+          if [ ! -f "values.yaml" ]; then
+            echo "Error: values.yaml not found"
+            exit 1
+          fi
+          
+          # Read current appVersion
+          CURRENT_VERSION=$(yq e '.appVersion' Chart.yaml)
+          if [ -z "$CURRENT_VERSION" ]; then
+            echo "Error: Could not read appVersion from Chart.yaml"
+            exit 1
+          fi
+          
+          # Read current imageTag
+          CURRENT_IMAGE_TAG=$(yq e '.imageTag' values.yaml)
+          echo "Current imageTag: $CURRENT_IMAGE_TAG"
+          
           # Update appVersion in Chart.yaml
           yq e -i ".appVersion = \"$NEW_VERSION\"" Chart.yaml
+          if [ $? -ne 0 ]; then
+            echo "Error: Failed to update appVersion in Chart.yaml"
+            exit 1
+          fi
           
-          # Update image in values.yaml
+          # Update imageTag in values.yaml
           yq e -i ".imageTag = \"$NEW_VERSION\"" values.yaml
+          if [ $? -ne 0 ]; then
+            echo "Error: Failed to update imageTag in values.yaml"
+            exit 1
+          fi
+          
+          # Verify the updates
+          echo "Verifying updates..."
+          echo "New appVersion in Chart.yaml: $(yq e '.appVersion' Chart.yaml)"
+          echo "New imageTag in values.yaml: $(yq e '.imageTag' values.yaml)"
           
           # Commit and push changes
           git config --global user.name "GitHub Actions"
           git config --global user.email "github-actions@github.com"
-          git add Chart.yaml
+          git add .
           git commit -m "Update Chart appVersion to $NEW_VERSION and imageTag to $NEW_VERSION"
           git push origin main 
