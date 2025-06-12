@@ -267,9 +267,12 @@ jobs:
           # Update appVersion in Chart.yaml
           yq e -i ".appVersion = \"$NEW_VERSION\"" Chart.yaml
           
+          # Update image in values.yaml
+          yq e -i ".imageTag = \"$NEW_VERSION\"" values.yaml
+          
           # Commit and push changes
           git config --global user.name "GitHub Actions"
           git config --global user.email "github-actions@github.com"
           git add Chart.yaml
-          git commit -m "Update Chart appVersion to $NEW_VERSION"
+          git commit -m "Update Chart appVersion to $NEW_VERSION and imageTag to $NEW_VERSION"
           git push origin main 

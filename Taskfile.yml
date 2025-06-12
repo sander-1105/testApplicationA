@@ -6,7 +6,7 @@ vars:
   DOCKER_REPO_NAME: "dev-billing"
   DEFAULT_IMAGE_REPO: "{{.REGION}}-docker.pkg.dev/{{.PROJECT_ID}}/{{.DOCKER_REPO_NAME}}"
   IMAGE_NAME:
-    sh: . ./VERSION && echo "$IMAGE_NAME"
+    sh: source ./VERSION && echo "$IMAGE_NAME"
   VERSION:
     sh: echo "${NEW_VERSION:-$(. ./VERSION && echo "$VERSION")}"
   IMAGE_REPO:
