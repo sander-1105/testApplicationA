@@ -288,14 +288,14 @@ jobs:
           echo "Current imageTag: $CURRENT_IMAGE_TAG"
           
           # Update appVersion in Chart.yaml
-          yq e -i ".appVersion = \"$NEW_VERSION\"" Chart.yaml
+          yq e -i -P ".appVersion = \"$NEW_VERSION\"" Chart.yaml
           if [ $? -ne 0 ]; then
             echo "Error: Failed to update appVersion in Chart.yaml"
             exit 1
           fi
           
           # Update imageTag in values.yaml
-          yq e -i ".imageTag = \"$NEW_VERSION\"" values.yaml
+          yq e -i -P ".imageTag = \"$NEW_VERSION\"" values.yaml
           if [ $? -ne 0 ]; then
             echo "Error: Failed to update imageTag in values.yaml"
             exit 1
