@@ -194,7 +194,7 @@ jobs:
           git add VERSION
           git commit -m "Bump version to ${{ env.NEW_VERSION }}"
 
-          git tag -a "v${{ env.NEW_LATEST_TAG }}" -m "Release version ${{ env.NEW_LATEST_TAG }}"
+          git tag -a "${{ env.NEW_LATEST_TAG }}" -m "Release version ${{ env.NEW_VERSION }}"
           git push origin --tags --atomic
 
   docker-build:
