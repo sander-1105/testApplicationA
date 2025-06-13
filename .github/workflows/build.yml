@@ -56,7 +56,7 @@ jobs:
           
           # List all tags
           echo "Available tags:"
-          git tag -l | sort -V
+          git tag -l | grep "^v" | sort -V
           
           # Get the latest tag using git tag -l and sort
           LATEST_TAG=$(git tag -l | sort -V | tail -n 1)
