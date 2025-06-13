@@ -206,11 +206,21 @@ jobs:
           # Ensure we're on main branch
           git checkout main
           
+          # Add and commit changes
           git add VERSION
           git commit -m "Bump version to ${{ env.NEW_VERSION }}"
-
+          
+          # Create and push tag
           git tag -a "${{ env.NEW_LATEST_TAG }}" -m "Release version ${{ env.NEW_VERSION }}"
-          git push origin --tags --atomic
+          
+          # Push changes and tag
+          git push origin main
+          git push origin "${{ env.NEW_LATEST_TAG }}"
+          
+          # Verify the changes
+          echo "Verifying changes..."
+          git fetch origin
+          git diff origin/main -- VERSION
 
   docker-build:
     needs: [pre-check, version-update]
