@@ -199,8 +199,39 @@ jobs:
           echo "Current appVersion: $CURRENT_VERSION"
           echo "New appVersion will be: $NEW_VERSION"
 
-  version-update:
+  docker-build:
     needs: [pre-check, chart-validation]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.base_ref == 'main')
+    env:
+      NEW_VERSION: ${{ needs.pre-check.outputs.new_version }}
+      NEW_LATEST_TAG: ${{ needs.pre-check.outputs.new_latest_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: main
+
+      - name: Install Task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image using Task
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SERVICE_ACCOUNT_BASE64_FILE: ${{ secrets.SERVICE_ACCOUNT_BASE64_FILE }}
+        run: |
+          task docker:build
+
+  version-update:
+    needs: [pre-check, chart-validation, docker-build]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.base_ref == 'main')
@@ -244,37 +275,6 @@ jobs:
           echo "Verifying changes..."
           git fetch origin
           git diff origin/main -- VERSION
-
-  docker-build:
-    needs: [pre-check, version-update]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.base_ref == 'main')
-    env:
-      NEW_VERSION: ${{ needs.pre-check.outputs.new_version }}
-      NEW_LATEST_TAG: ${{ needs.pre-check.outputs.new_latest_tag }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-          ref: main
-
-      - name: Install Task
-        uses: arduino/setup-task@v2
-        with:
-          version: 3.x
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Docker image using Task
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          SERVICE_ACCOUNT_BASE64_FILE: ${{ secrets.SERVICE_ACCOUNT_BASE64_FILE }}
-        run: |
-          task docker:build
 
   chart-update:
     needs: [pre-check, version-update, docker-build]
