@@ -359,5 +359,5 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "github-actions@github.com"
           git add .
-          git commit -m "Update Chart appVersion to $NEW_VERSION and imageTag to $NEW_VERSION"
+          git commit -m "chore: Update Chart appVersion to $NEW_VERSION and imageTag to $NEW_VERSION"
           git push origin main --tags --atomic
