@@ -31,6 +31,7 @@ jobs:
     outputs:
       current_version: ${{ steps.read_version.outputs.current_version }}
       new_version: ${{ steps.read_version.outputs.new_version }}
+      new_latest_tag: ${{ steps.read_version.outputs.new_latest_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,6 +45,22 @@ jobs:
             echo "Error: VERSION file not found"
             exit 1
           fi
+          
+          # Get the latest tag
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "Latest tag: $LATEST_TAG"
+          
+          # Remove 'v' prefix and split version
+          VERSION_NUMBER=${LATEST_TAG#v}
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION_NUMBER"
+          
+          # Increment MINOR version
+          NEW_MINOR=$((MINOR + 1))
+          NEW_VERSION="${MAJOR}.${NEW_MINOR}.${PATCH}"
+          NEW_LATEST_TAG="v${NEW_VERSION}"
+          echo "Current version: ${MAJOR}.${MINOR}.${PATCH}"
+          echo "New version: $NEW_VERSION"
+          echo "New tag: $NEW_LATEST_TAG"
           
           # Check if this is the first commit
           if git rev-parse HEAD~1 >/dev/null 2>&1; then
@@ -68,10 +85,9 @@ jobs:
             exit 1
           fi
           
-          NEW_VERSION=$(echo $VERSION | awk -F. '{$2 = $2 + 1;} 1' | sed 's/ /./g')
-          
           echo "current_version=$VERSION" >> $GITHUB_OUTPUT
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "new_latest_tag=$NEW_LATEST_TAG" >> $GITHUB_OUTPUT
 
   chart-validation:
     needs: pre-check
@@ -80,6 +96,7 @@ jobs:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.base_ref == 'main')
     env:
       NEW_VERSION: ${{ needs.pre-check.outputs.new_version }}
+      NEW_LATEST_TAG: ${{ needs.pre-check.outputs.new_latest_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -152,6 +169,7 @@ jobs:
     env:
       CURRENT_VERSION: ${{ needs.pre-check.outputs.current_version }}
       NEW_VERSION: ${{ needs.pre-check.outputs.new_version }}
+      NEW_LATEST_TAG: ${{ needs.pre-check.outputs.new_latest_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -176,7 +194,7 @@ jobs:
           git add VERSION
           git commit -m "Bump version to ${{ env.NEW_VERSION }}"
 
-          git tag -a "v${{ env.NEW_VERSION }}" -m "Release version ${{ env.NEW_VERSION }}"
+          git tag -a "v${{ env.NEW_LATEST_TAG }}" -m "Release version ${{ env.NEW_LATEST_TAG }}"
           git push origin --tags --atomic
 
   docker-build:
@@ -186,6 +204,7 @@ jobs:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.base_ref == 'main')
     env:
       NEW_VERSION: ${{ needs.pre-check.outputs.new_version }}
+      NEW_LATEST_TAG: ${{ needs.pre-check.outputs.new_latest_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -216,6 +235,7 @@ jobs:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.base_ref == 'main')
     env:
       NEW_VERSION: ${{ needs.pre-check.outputs.new_version }}
+      NEW_LATEST_TAG: ${{ needs.pre-check.outputs.new_latest_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
