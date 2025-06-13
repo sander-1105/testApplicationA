@@ -269,6 +269,7 @@ jobs:
             echo "Error: helm-chart-ssh-url not found in ci.yml"
             exit 1
           fi
+          echo "helm-chart-ssh-url: $HELM_CHART_SSH_URL"
           
           # Extract repository name from URL
           REPO_NAME=$(basename "$HELM_CHART_SSH_URL" .git)
