@@ -46,8 +46,23 @@ jobs:
             exit 1
           fi
           
-          # Get the latest tag
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          # Fetch all tags
+          echo "Fetching all tags..."
+          git fetch --tags --force
+          if [ $? -ne 0 ]; then
+            echo "Error: Failed to fetch tags"
+            exit 1
+          fi
+          
+          # List all tags
+          echo "Available tags:"
+          git tag -l | sort -V
+          
+          # Get the latest tag using git tag -l and sort
+          LATEST_TAG=$(git tag -l | sort -V | tail -n 1)
+          if [ -z "$LATEST_TAG" ]; then
+            LATEST_TAG="v0.0.0"
+          fi
           echo "Latest tag: $LATEST_TAG"
           
           # Remove 'v' prefix and split version
