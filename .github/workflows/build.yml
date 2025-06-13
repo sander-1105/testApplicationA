@@ -305,6 +305,12 @@ jobs:
           CURRENT_IMAGE_TAG=$(yq e '.imageTag' values.yaml)
           echo "Current imageTag: $CURRENT_IMAGE_TAG"
           
+          # Check if version needs to be updated
+          if [ "$CURRENT_VERSION" = "$NEW_VERSION" ] && [ "$CURRENT_IMAGE_TAG" = "$NEW_VERSION" ]; then
+            echo -e "\033[31mVersion conflict: the current version number($CURRENT_VERSION) is the same as the new version number($NEW_VERSION). Please check.\033[0m"
+            exit 0
+          fi
+          
           # Update appVersion in Chart.yaml
           yq e -i -P ".appVersion = \"$NEW_VERSION\"" Chart.yaml
           if [ $? -ne 0 ]; then
