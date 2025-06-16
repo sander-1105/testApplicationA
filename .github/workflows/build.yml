@@ -50,6 +50,13 @@ jobs:
             exit 1
           fi
           
+          # Source the VERSION file to get the version
+          source VERSION
+          if [ -z "$VERSION" ]; then
+            echo "Error: VERSION variable not set after sourcing VERSION file"
+            exit 1
+          fi
+          
           # Fetch all tags
           echo "Fetching all tags..."
           git fetch --tags --force
@@ -90,18 +97,6 @@ jobs:
             fi
           else
             echo "First commit detected, proceeding with build"
-          fi
-          
-          VERSION_LINE=$(grep "export VERSION=" VERSION)
-          if [ -z "$VERSION_LINE" ]; then
-            echo "Error: VERSION line not found in VERSION file"
-            exit 1
-          fi
-          
-          VERSION=$(echo "$VERSION_LINE" | cut -d'=' -f2)
-          if [ -z "$VERSION" ]; then
-            echo "Error: Could not extract version number"
-            exit 1
           fi
           
           # Compare versions using the script
