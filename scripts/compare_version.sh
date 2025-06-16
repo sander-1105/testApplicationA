@@ -37,7 +37,7 @@ compare_versions "$1" "$2"
 result=$?
 
 case $result in
-    0)
+    3)
         echo "Version $1 is greater than $2"
         exit 0
         ;;
